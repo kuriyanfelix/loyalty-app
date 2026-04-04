@@ -1,0 +1,53 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String         @id @default(cuid())
+  phoneNumber   String         @unique
+  name          String?
+  createdAt     DateTime       @default(now())
+  loyaltyAccount LoyaltyAccount?
+  transactions  Transaction[]
+  otpCodes      OtpCode[]
+}
+
+model LoyaltyAccount {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id])
+  currentStamps     Int      @default(0)
+  totalStampsEarned Int      @default(0)
+  updatedAt         DateTime @updatedAt
+}
+
+model Transaction {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id])
+  type      TransactionType
+  amount    Int
+  note      String?
+  createdAt DateTime        @default(now())
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  code      String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+enum TransactionType {
+  ADD_STAMP
+  REDEEM
+}

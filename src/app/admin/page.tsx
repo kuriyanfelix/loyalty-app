@@ -184,14 +184,14 @@ export default function AdminPage() {
           className="bg-white rounded-2xl p-4 border shadow-sm"
           style={{ borderColor: "var(--cream-200)" }}>
           <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--espresso)" }}>
-            Customer Phone Number
+            Customer Email
           </label>
           <div className="flex gap-2">
             <input
               type="tel"
               value={phone}
               onChange={e => setPhone(e.target.value)}
-              placeholder="+1 555 000 0000"
+              placeholder="customer@example.com"
               className="flex-1 px-4 py-3 rounded-xl border text-sm outline-none"
               style={{ borderColor: "var(--cream-200)", backgroundColor: "var(--cream)", color: "var(--espresso)" }}
               onFocus={e => (e.target.style.borderColor = "var(--caramel)")}

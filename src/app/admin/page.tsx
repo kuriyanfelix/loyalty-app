@@ -14,6 +14,8 @@ interface CustomerData {
   rewardsAvailable: number;
 }
 
+type SearchMode = "code" | "email";
+
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
@@ -27,7 +29,9 @@ function timeAgo(iso: string) {
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState("");
   const [authed, setAuthed] = useState(false);
-  const [phone, setPhone] = useState("");
+  const [searchMode, setSearchMode] = useState<SearchMode>("code");
+  const [codeInput, setCodeInput] = useState("");
+  const [emailInput, setEmailInput] = useState("");
   const [data, setData] = useState<CustomerData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -39,7 +43,7 @@ export default function AdminPage() {
     setAuthed(true);
   }
 
-  async function searchCustomer(e: React.FormEvent) {
+  async function searchByCode(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setSuccessMsg("");
@@ -47,7 +51,29 @@ export default function AdminPage() {
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/admin/customer?phone=${encodeURIComponent(phone)}`,
+        `/api/checkin/lookup?code=${encodeURIComponent(codeInput.toUpperCase())}`,
+        { headers: { "x-admin-key": adminKey } }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Not found");
+      setData(json);
+      setCodeInput("");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function searchByEmail(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setSuccessMsg("");
+    setData(null);
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/admin/customer?phone=${encodeURIComponent(emailInput)}`,
         { headers: { "x-admin-key": adminKey } }
       );
       const json = await res.json();
@@ -74,15 +100,9 @@ export default function AdminPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       setSuccessMsg("✓ Stamp added!");
-      // Refresh customer data
-      const refresh = await fetch(
-        `/api/admin/customer?phone=${encodeURIComponent(data.user.phoneNumber)}`,
-        { headers: { "x-admin-key": adminKey } }
-      );
-      setData(await refresh.json());
+      refreshCustomer(data.user.phoneNumber);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Error");
-    } finally {
       setLoading(false);
     }
   }
@@ -101,16 +121,21 @@ export default function AdminPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       setSuccessMsg("🎁 Reward redeemed!");
-      const refresh = await fetch(
-        `/api/admin/customer?phone=${encodeURIComponent(data.user.phoneNumber)}`,
-        { headers: { "x-admin-key": adminKey } }
-      );
-      setData(await refresh.json());
+      refreshCustomer(data.user.phoneNumber);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Error");
-    } finally {
       setLoading(false);
     }
+  }
+
+  async function refreshCustomer(phone: string) {
+    const res = await fetch(
+      `/api/admin/customer?phone=${encodeURIComponent(phone)}`,
+      { headers: { "x-admin-key": adminKey } }
+    );
+    const json = await res.json();
+    if (res.ok) setData(json);
+    setLoading(false);
   }
 
   const stamps = data?.user.loyaltyAccount?.currentStamps ?? 0;
@@ -179,43 +204,99 @@ export default function AdminPage() {
       </header>
 
       <div className="px-5 pb-12 space-y-4">
-        {/* Search */}
-        <form onSubmit={searchCustomer}
-          className="bg-white rounded-2xl p-4 border shadow-sm"
-          style={{ borderColor: "var(--cream-200)" }}>
-          <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--espresso)" }}>
-            Customer Email
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="tel"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              placeholder="customer@example.com"
-              className="flex-1 px-4 py-3 rounded-xl border text-sm outline-none"
-              style={{ borderColor: "var(--cream-200)", backgroundColor: "var(--cream)", color: "var(--espresso)" }}
-              onFocus={e => (e.target.style.borderColor = "var(--caramel)")}
-              onBlur={e => (e.target.style.borderColor = "var(--cream-200)")}
-            />
-            <button type="submit" disabled={loading || !phone}
-              className="px-5 py-3 rounded-xl text-sm font-medium text-white disabled:opacity-50"
-              style={{ backgroundColor: "var(--espresso)" }}>
-              {loading ? "…" : "Find"}
+
+        {/* Search mode toggle */}
+        <div className="flex rounded-xl overflow-hidden border"
+          style={{ borderColor: "var(--cream-200)", backgroundColor: "white" }}>
+          {(["code", "email"] as SearchMode[]).map(mode => (
+            <button key={mode}
+              onClick={() => { setSearchMode(mode); setData(null); setError(""); }}
+              className="flex-1 py-2.5 text-xs font-medium transition-colors"
+              style={{
+                backgroundColor: searchMode === mode ? "var(--espresso)" : "transparent",
+                color: searchMode === mode ? "white" : "var(--espresso)",
+              }}>
+              {mode === "code" ? "🏪 Check-In Code" : "✉️ Email"}
             </button>
-          </div>
-          {error && !data && <p className="text-red-500 text-xs mt-2">{error}</p>}
-        </form>
+          ))}
+        </div>
+
+        {/* Code search */}
+        {searchMode === "code" && (
+          <form onSubmit={searchByCode}
+            className="bg-white rounded-2xl p-5 border shadow-sm space-y-3"
+            style={{ borderColor: "var(--cream-200)" }}>
+            <p className="text-xs" style={{ color: "var(--espresso)", opacity: 0.6 }}>
+              Ask the customer to open their app and tap "Check In at Counter"
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={codeInput}
+                onChange={e => setCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4))}
+                placeholder="A3F7"
+                maxLength={4}
+                autoFocus
+                className="flex-1 px-4 py-4 rounded-xl border text-center font-display text-3xl tracking-widest outline-none uppercase"
+                style={{
+                  borderColor: "var(--cream-200)",
+                  backgroundColor: "var(--cream)",
+                  color: "var(--espresso)",
+                  letterSpacing: "0.3em",
+                }}
+                onFocus={e => (e.target.style.borderColor = "var(--caramel)")}
+                onBlur={e => (e.target.style.borderColor = "var(--cream-200)")}
+              />
+              <button type="submit"
+                disabled={loading || codeInput.length !== 4}
+                className="px-5 rounded-xl text-sm font-medium text-white disabled:opacity-50"
+                style={{ backgroundColor: "var(--espresso)" }}>
+                {loading ? "…" : "Find"}
+              </button>
+            </div>
+            {error && <p className="text-red-500 text-xs">{error}</p>}
+          </form>
+        )}
+
+        {/* Email search */}
+        {searchMode === "email" && (
+          <form onSubmit={searchByEmail}
+            className="bg-white rounded-2xl p-4 border shadow-sm"
+            style={{ borderColor: "var(--cream-200)" }}>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--espresso)" }}>
+              Customer Email
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={emailInput}
+                onChange={e => setEmailInput(e.target.value)}
+                placeholder="customer@example.com"
+                className="flex-1 px-4 py-3 rounded-xl border text-sm outline-none"
+                style={{ borderColor: "var(--cream-200)", backgroundColor: "var(--cream)", color: "var(--espresso)" }}
+                onFocus={e => (e.target.style.borderColor = "var(--caramel)")}
+                onBlur={e => (e.target.style.borderColor = "var(--cream-200)")}
+              />
+              <button type="submit"
+                disabled={loading || !emailInput}
+                className="px-5 py-3 rounded-xl text-sm font-medium text-white disabled:opacity-50"
+                style={{ backgroundColor: "var(--espresso)" }}>
+                {loading ? "…" : "Find"}
+              </button>
+            </div>
+            {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
+          </form>
+        )}
 
         {/* Customer card */}
         {data && (
           <div className="space-y-4">
-            {/* Profile */}
             <div className="bg-white rounded-2xl p-5 border shadow-sm"
               style={{ borderColor: "var(--cream-200)" }}>
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold"
                   style={{ backgroundColor: "var(--espresso)" }}>
-                  {data.user.name ? data.user.name[0].toUpperCase() : "?"}
+                  {data.user.name ? data.user.name[0].toUpperCase() : "✉"}
                 </div>
                 <div>
                   <p className="font-medium text-sm" style={{ color: "var(--espresso)" }}>
@@ -228,51 +309,42 @@ export default function AdminPage() {
               </div>
 
               {/* Stamp count */}
-              <div className="rounded-xl p-4 mb-4"
-                style={{ backgroundColor: "var(--cream-100)" }}>
+              <div className="rounded-xl p-4 mb-4" style={{ backgroundColor: "var(--cream-100)" }}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs uppercase tracking-wider mb-0.5"
-                      style={{ color: "var(--caramel)" }}>Current Stamps</p>
+                    <p className="text-xs uppercase tracking-wider mb-0.5" style={{ color: "var(--caramel)" }}>
+                      Current Stamps
+                    </p>
                     <p className="font-display text-4xl font-bold" style={{ color: "var(--espresso)" }}>
                       {stamps}
                       <span className="text-base font-body opacity-40 ml-1">/ {spr}</span>
                     </p>
                   </div>
                   {rewards > 0 && (
-                    <div className="text-right">
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-white"
-                        style={{ backgroundColor: "var(--caramel)" }}>
-                        🎁 {rewards} reward{rewards > 1 ? "s" : ""} ready
-                      </div>
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-white"
+                      style={{ backgroundColor: "var(--caramel)" }}>
+                      🎁 {rewards} ready
                     </div>
                   )}
                 </div>
-                {/* Mini stamp grid */}
                 <div className="grid gap-1.5 mt-3"
                   style={{ gridTemplateColumns: `repeat(${Math.min(spr, 10)}, minmax(0, 1fr))` }}>
                   {Array.from({ length: Math.min(spr, 10) }, (_, i) => (
                     <div key={i} className="aspect-square rounded"
-                      style={{
-                        backgroundColor: i < stamps ? "var(--caramel)" : "var(--stamp-empty)",
-                      }} />
+                      style={{ backgroundColor: i < stamps ? "var(--caramel)" : "var(--stamp-empty)" }} />
                   ))}
                 </div>
               </div>
 
               {/* Action buttons */}
               <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={addStamp}
-                  disabled={loading}
+                <button onClick={addStamp} disabled={loading}
                   className="py-4 rounded-xl text-sm font-medium text-white disabled:opacity-50 transition-transform active:scale-95"
                   style={{ backgroundColor: "var(--espresso)" }}>
                   <span className="block text-xl mb-1">✦</span>
                   Add Stamp
                 </button>
-                <button
-                  onClick={redeemReward}
-                  disabled={loading || rewards === 0}
+                <button onClick={redeemReward} disabled={loading || rewards === 0}
                   className="py-4 rounded-xl text-sm font-medium disabled:opacity-40 transition-transform active:scale-95"
                   style={{
                     backgroundColor: rewards > 0 ? "var(--caramel)" : "var(--stamp-empty)",
@@ -289,9 +361,7 @@ export default function AdminPage() {
                   {successMsg}
                 </div>
               )}
-              {error && (
-                <p className="mt-3 text-xs text-red-500 text-center">{error}</p>
-              )}
+              {error && <p className="mt-3 text-xs text-red-500 text-center">{error}</p>}
             </div>
 
             {/* Recent transactions */}
@@ -299,8 +369,9 @@ export default function AdminPage() {
               <div className="bg-white rounded-2xl border overflow-hidden shadow-sm"
                 style={{ borderColor: "var(--cream-200)" }}>
                 <div className="px-4 py-3 border-b" style={{ borderColor: "var(--cream-200)" }}>
-                  <p className="text-xs font-medium uppercase tracking-wider"
-                    style={{ color: "var(--caramel)" }}>Recent Activity</p>
+                  <p className="text-xs font-medium uppercase tracking-wider" style={{ color: "var(--caramel)" }}>
+                    Recent Activity
+                  </p>
                 </div>
                 {data.user.transactions.map((t, i) => (
                   <div key={t.id}

@@ -1,5 +1,6 @@
 "use client";
 // src/app/dashboard/DashboardClient.tsx
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import StampCard from "@/components/StampCard";
 
@@ -20,14 +21,6 @@ interface Props {
   transactions: Transaction[];
 }
 
-function formatPhone(p: string) {
-  const d = p.replace(/\D/g, "");
-  if (d.length === 11 && d[0] === "1") {
-    return `+1 (${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7)}`;
-  }
-  return p;
-}
-
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
@@ -43,12 +36,49 @@ export default function DashboardClient({
   stampsPerReward, rewardsAvailable, transactions,
 }: Props) {
   const router = useRouter();
+  const [checkInCode, setCheckInCode] = useState<string | null>(null);
+  const [checkInExpiry, setCheckInExpiry] = useState<Date | null>(null);
+  const [checkInLoading, setCheckInLoading] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+
+  // Countdown timer
+  useEffect(() => {
+    if (!checkInExpiry) return;
+    const interval = setInterval(() => {
+      const left = Math.max(0, Math.floor((checkInExpiry.getTime() - Date.now()) / 1000));
+      setSecondsLeft(left);
+      if (left === 0) {
+        setCheckInCode(null);
+        setCheckInExpiry(null);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [checkInExpiry]);
+
+  const generateCheckIn = useCallback(async () => {
+    setCheckInLoading(true);
+    try {
+      const res = await fetch("/api/checkin/generate", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setCheckInCode(data.code);
+      setCheckInExpiry(new Date(data.expiresAt));
+      setSecondsLeft(300);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCheckInLoading(false);
+    }
+  }, []);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
     router.refresh();
   }
+
+  const mins = Math.floor(secondsLeft / 60);
+  const secs = secondsLeft % 60;
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "var(--cream)" }}>
@@ -60,7 +90,7 @@ export default function DashboardClient({
             Welcome back
           </p>
           <h1 className="font-display text-2xl font-bold" style={{ color: "var(--espresso)" }}>
-            {name || formatPhone(phone)}
+            {name || phone}
           </h1>
         </div>
         <button
@@ -77,9 +107,70 @@ export default function DashboardClient({
           <StampCard currentStamps={currentStamps} stampsPerReward={stampsPerReward} />
         </div>
 
+        {/* CHECK IN BUTTON / CODE DISPLAY */}
+        <div className="fade-up fade-up-delay-2">
+          {!checkInCode ? (
+            <button
+              onClick={generateCheckIn}
+              disabled={checkInLoading}
+              className="w-full py-5 rounded-2xl text-white font-medium text-base transition-transform active:scale-95 disabled:opacity-50"
+              style={{
+                background: "linear-gradient(135deg, var(--caramel) 0%, var(--caramel-light) 100%)",
+                boxShadow: "0 4px 20px rgba(200,118,58,0.35)",
+              }}>
+              {checkInLoading ? "Generating…" : "🏪  Check In at Counter"}
+            </button>
+          ) : (
+            <div
+              className="rounded-2xl p-5 text-center"
+              style={{
+                background: "linear-gradient(135deg, var(--espresso) 0%, var(--espresso-light) 100%)",
+                boxShadow: "0 8px 32px rgba(44,22,8,0.25)",
+              }}>
+              <p className="text-xs uppercase tracking-widest mb-3 opacity-60 text-white">
+                Show this code to staff
+              </p>
+              {/* Big code display */}
+              <div className="flex items-center justify-center gap-3 my-3">
+                {checkInCode.split("").map((char, i) => (
+                  <div key={i}
+                    className="w-16 h-20 rounded-xl flex items-center justify-center"
+                    style={{ backgroundColor: "rgba(255,255,255,0.12)" }}>
+                    <span className="font-display text-4xl font-bold text-white">
+                      {char}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {/* Countdown */}
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <div className="h-1 rounded-full flex-1 overflow-hidden"
+                  style={{ backgroundColor: "rgba(255,255,255,0.15)" }}>
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${(secondsLeft / 300) * 100}%`,
+                      backgroundColor: secondsLeft < 60 ? "#ef4444" : "var(--caramel-light)",
+                    }}
+                  />
+                </div>
+                <span className="text-xs font-medium text-white opacity-70 w-10 text-right">
+                  {mins}:{secs.toString().padStart(2, "0")}
+                </span>
+              </div>
+              <button
+                onClick={generateCheckIn}
+                className="mt-4 text-xs opacity-50 text-white hover:opacity-80 transition-opacity">
+                Generate new code
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Stats row */}
         <div className="grid grid-cols-2 gap-3 fade-up fade-up-delay-2">
-          <div className="rounded-xl p-4 border" style={{ backgroundColor: "white", borderColor: "var(--cream-200)" }}>
+          <div className="rounded-xl p-4 border"
+            style={{ backgroundColor: "white", borderColor: "var(--cream-200)" }}>
             <p className="text-xs uppercase tracking-wider mb-1" style={{ color: "var(--caramel)" }}>
               Total Earned
             </p>
@@ -113,25 +204,25 @@ export default function DashboardClient({
           </div>
         </div>
 
-        {/* Reward info banner */}
+        {/* Reward banner */}
         {rewardsAvailable > 0 && (
-          <div
-            className="rounded-xl p-4 flex items-center gap-3 fade-up"
+          <div className="rounded-xl p-4 flex items-center gap-3 fade-up"
             style={{ backgroundColor: "var(--caramel)", color: "white" }}>
             <span className="text-2xl">🎁</span>
             <div>
-              <p className="font-medium text-sm">You have {rewardsAvailable} free reward{rewardsAvailable > 1 ? "s" : ""}!</p>
-              <p className="text-xs opacity-80 mt-0.5">Show this screen to staff to redeem</p>
+              <p className="font-medium text-sm">
+                You have {rewardsAvailable} free reward{rewardsAvailable > 1 ? "s" : ""}!
+              </p>
+              <p className="text-xs opacity-80 mt-0.5">Staff will apply it when you check in</p>
             </div>
           </div>
         )}
 
-        {/* Next reward progress */}
+        {/* Progress bar */}
         {rewardsAvailable === 0 && (
           <div className="rounded-xl p-4 border fade-up fade-up-delay-2"
             style={{ backgroundColor: "white", borderColor: "var(--cream-200)" }}>
-            <div className="flex justify-between text-xs mb-2"
-              style={{ color: "var(--espresso)" }}>
+            <div className="flex justify-between text-xs mb-2" style={{ color: "var(--espresso)" }}>
               <span className="font-medium">Next free item</span>
               <span style={{ color: "var(--caramel)" }}>
                 {stampsPerReward - currentStamps} stamp{stampsPerReward - currentStamps !== 1 ? "s" : ""} away
@@ -163,14 +254,10 @@ export default function DashboardClient({
               {transactions.map((t, i) => (
                 <div key={t.id}
                   className="flex items-center justify-between px-4 py-3"
-                  style={{
-                    borderTop: i > 0 ? `1px solid var(--cream-200)` : "none",
-                  }}>
+                  style={{ borderTop: i > 0 ? "1px solid var(--cream-200)" : "none" }}>
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full flex items-center justify-center"
-                      style={{
-                        backgroundColor: t.type === "ADD_STAMP" ? "var(--cream-100)" : "rgba(200,118,58,0.12)",
-                      }}>
+                      style={{ backgroundColor: t.type === "ADD_STAMP" ? "var(--cream-100)" : "rgba(200,118,58,0.12)" }}>
                       <span className="text-sm">{t.type === "ADD_STAMP" ? "✦" : "🎁"}</span>
                     </div>
                     <div>

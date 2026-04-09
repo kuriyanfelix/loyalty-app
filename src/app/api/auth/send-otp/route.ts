@@ -9,20 +9,11 @@ async function sendEmail(to: string, code: string) {
   const clientSecret = process.env.GMAIL_CLIENT_SECRET;
   const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
 
-  console.log("Gmail env check:", {
-    user: !!user,
-    clientId: !!clientId,
-    clientSecret: !!clientSecret,
-    refreshToken: !!refreshToken,
-    refreshTokenPrefix: refreshToken?.slice(0, 6),
-  });
-
   if (!user || !clientId || !clientSecret || !refreshToken) {
-    console.log("Mock mode — OTP:", code);
+    console.log(`\n🔐 OTP for ${to}: ${code}\n`);
     return;
   }
 
-  // Step 1: Get access token
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -35,15 +26,11 @@ async function sendEmail(to: string, code: string) {
   });
 
   const tokenData = await tokenRes.json();
-  console.log("Token response:", JSON.stringify(tokenData));
 
   if (!tokenData.access_token) {
-    throw new Error("Failed to get access token: " + JSON.stringify(tokenData));
+    throw new Error("Failed to get access token");
   }
 
-  const access_token = tokenData.access_token;
-
-  // Step 2: Build email
   const message = [
     `From: Crumb & Co <${user}>`,
     `To: ${to}`,
@@ -74,24 +61,22 @@ async function sendEmail(to: string, code: string) {
 
   const encoded = Buffer.from(message).toString("base64url");
 
-  // Step 3: Send email
   const sendRes = await fetch(
     "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${access_token}`,
+        Authorization: `Bearer ${tokenData.access_token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ raw: encoded }),
     }
   );
 
-  const sendData = await sendRes.json();
-  console.log("Gmail send response:", JSON.stringify(sendData));
-
   if (!sendRes.ok) {
-    throw new Error("Gmail send failed: " + JSON.stringify(sendData));
+    const err = await sendRes.json();
+    console.error("Gmail send failed:", err);
+    throw new Error("Failed to send email");
   }
 }
 
@@ -131,8 +116,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       message: "Code sent to your email",
-      ...(!process.env.GMAIL_CLIENT_ID &&
-        process.env.NODE_ENV !== "production" && { devOtp: code }),
     });
   } catch (err) {
     console.error("send-otp error:", err);

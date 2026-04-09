@@ -12,10 +12,13 @@ export async function GET(req: NextRequest) {
   const phone = searchParams.get("phone");
 
   if (!phone) {
-    return NextResponse.json({ error: "Phone required" }, { status: 400 });
+    return NextResponse.json({ error: "Email required" }, { status: 400 });
   }
 
-  const normalized = phone.replace(/[\s\-()]/g, "");
+  // Normalize: trim and lowercase, same as how it was stored at signup
+  const normalized = phone.trim().toLowerCase();
+
+  console.log("Admin searching for:", normalized);
 
   const user = await prisma.user.findUnique({
     where: { phoneNumber: normalized },
@@ -26,7 +29,27 @@ export async function GET(req: NextRequest) {
   });
 
   if (!user) {
-    return NextResponse.json({ error: "Customer not found" }, { status: 404 });
+    // Also try a fuzzy search in case of mismatch
+    const allUsers = await prisma.user.findMany({
+      where: {
+        phoneNumber: { contains: normalized.split("@")[0] }
+      },
+      include: { loyaltyAccount: true, transactions: { orderBy: { createdAt: "desc" }, take: 10 } },
+      take: 1,
+    });
+
+    console.log("Fuzzy search results:", allUsers.map(u => u.phoneNumber));
+
+    if (allUsers.length === 0) {
+      return NextResponse.json({ error: "Customer not found" }, { status: 404 });
+    }
+
+    const found = allUsers[0];
+    return NextResponse.json({
+      user: found,
+      stampsPerReward: STAMPS_PER_REWARD,
+      rewardsAvailable: Math.floor((found.loyaltyAccount?.currentStamps ?? 0) / STAMPS_PER_REWARD),
+    });
   }
 
   return NextResponse.json({

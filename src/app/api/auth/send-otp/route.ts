@@ -5,15 +5,45 @@ import { generateOTP } from "@/lib/auth";
 
 async function sendEmail(to: string, code: string) {
   const user = process.env.GMAIL_USER;
-  const pass = process.env.GMAIL_APP_PASSWORD;
+  const clientId = process.env.GMAIL_CLIENT_ID;
+  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+  const refreshToken = process.env.GMAIL_REFRESH_TOKEN;
 
-  if (!user || !pass) {
-    // Mock mode — log to console
-    console.log(`\n🔐 OTP for ${to}: ${code}\n`);
+  console.log("Gmail env check:", {
+    user: !!user,
+    clientId: !!clientId,
+    clientSecret: !!clientSecret,
+    refreshToken: !!refreshToken,
+    refreshTokenPrefix: refreshToken?.slice(0, 6),
+  });
+
+  if (!user || !clientId || !clientSecret || !refreshToken) {
+    console.log("Mock mode — OTP:", code);
     return;
   }
 
-  // Send via Gmail SMTP using fetch to our internal email endpoint
+  // Step 1: Get access token
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+
+  const tokenData = await tokenRes.json();
+  console.log("Token response:", JSON.stringify(tokenData));
+
+  if (!tokenData.access_token) {
+    throw new Error("Failed to get access token: " + JSON.stringify(tokenData));
+  }
+
+  const access_token = tokenData.access_token;
+
+  // Step 2: Build email
   const message = [
     `From: Crumb & Co <${user}>`,
     `To: ${to}`,
@@ -44,19 +74,7 @@ async function sendEmail(to: string, code: string) {
 
   const encoded = Buffer.from(message).toString("base64url");
 
-  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: process.env.GMAIL_CLIENT_ID || "",
-      client_secret: process.env.GMAIL_CLIENT_SECRET || "",
-      refresh_token: process.env.GMAIL_REFRESH_TOKEN || "",
-      grant_type: "refresh_token",
-    }),
-  });
-
-  const { access_token } = await tokenRes.json();
-
+  // Step 3: Send email
   const sendRes = await fetch(
     "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
     {
@@ -69,10 +87,11 @@ async function sendEmail(to: string, code: string) {
     }
   );
 
+  const sendData = await sendRes.json();
+  console.log("Gmail send response:", JSON.stringify(sendData));
+
   if (!sendRes.ok) {
-    const err = await sendRes.json();
-    console.error("Gmail error:", err);
-    throw new Error("Failed to send email");
+    throw new Error("Gmail send failed: " + JSON.stringify(sendData));
   }
 }
 
@@ -116,7 +135,7 @@ export async function POST(req: NextRequest) {
         process.env.NODE_ENV !== "production" && { devOtp: code }),
     });
   } catch (err) {
-    console.error(err);
+    console.error("send-otp error:", err);
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }

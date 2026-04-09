@@ -9,13 +9,14 @@ datasource db {
 }
 
 model User {
-  id            String         @id @default(cuid())
-  phoneNumber   String         @unique
-  name          String?
-  createdAt     DateTime       @default(now())
+  id             String          @id @default(cuid())
+  phoneNumber    String          @unique
+  name           String?
+  createdAt      DateTime        @default(now())
   loyaltyAccount LoyaltyAccount?
-  transactions  Transaction[]
-  otpCodes      OtpCode[]
+  transactions   Transaction[]
+  otpCodes       OtpCode[]
+  checkInCodes   CheckInCode[]
 }
 
 model LoyaltyAccount {
@@ -42,6 +43,16 @@ model OtpCode {
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   code      String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model CheckInCode {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  code      String   @unique
   expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
